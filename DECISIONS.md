@@ -1,46 +1,62 @@
-# Scope Decisions & AI Usage Documentation
+# Architectural Decisions Log
 
-This document outlines key technical decisions, scope trade-offs, and details regarding AI-human pair programming collaboration for the Shared Expense Management Platform.
-
----
-
-## Architectural & Scope Decisions
-
-### 1. Local Fallback Authentication ("Demo Mode")
-* **Decision**: We integrated a hybrid authentication system. In production, the backend verifies real JWT tokens from Clerk. In local development, the system falls back to a **Demo Mode** using a mock token authenticator.
-* **Rationale**: This decouples development from third-party API availability, allowing developers to spin up the app offline with instant multi-user simulation without requiring active Clerk API keys.
-
-### 2. Client-Side PDF Report Generation
-* **Decision**: CSV import reports are generated entirely on the frontend using `jspdf` and `jspdf-autotable`, consuming aggregated metadata from the backend `/api/import/session/:sessionId/report` endpoint.
-* **Rationale**: Offloading PDF generation to the client browser eliminates server-side PDF canvas dependencies, reduces CPU load on the backend API server, and allows instant downloads.
-
-### 3. Chronological Pairwise Ledger Traceability
-* **Decision**: In addition to computing simplified debts using a greedy balance-minimization algorithm, we implemented a pairwise transaction audit trail between any two members.
-* **Rationale**: Simple debt reduction is convenient but destroys history (e.g. if A owes B, and B owes C, simplification resolves to A paying C, hiding B's involvement). Pairwise ledger chains ensure total auditability, allowing users to verify every transaction that led to their current balance.
-
-### 4. Database-Level Soft Deletes (`deletedAt`)
-* **Decision**: All entities (Users, Groups, Expenses, Settlements, Group Memberships) implement soft deletes via a nullable `deletedAt` field instead of physical row deletions.
-* **Rationale**: Reconstructs historically accurate group states and balances. Even if an expense is deleted or a member leaves, audit logs and historic membership spans remain auditable.
+This document details key architectural decisions, design options considered, and the rationale behind final selections.
 
 ---
 
-## AI Collaboration & Tooling Details
+## 1. Hybrid Authentication Model
 
-This platform was built through a pair programming workflow between the developer and **Antigravity**, an agentic AI coding assistant developed by the Google DeepMind team.
+### Options Considered
+* **Option A (Clerk-Only Auth)**: Force active Clerk keys and configuration in all environments.
+* **Option B (Custom DB Auth)**: Build standard JWT sessions using username/passwords.
+* **Option C (Hybrid Clerk + Development Mock Fallback)**: Validate Clerk JWT signatures in production, falling back in development to a local `localStorage` mock profile switcher with a standard `mock-token-*` authorization header prefix.
 
-### Division of Labor
-* **Antigravity (AI)**:
-  * Scaffolded the monorepo structure.
-  * Designed the database schemas and ran Prisma migrations.
-  * Implemented the timeline active membership check, split calculations, CSV parsing logic, and the 21-rule anomaly detector.
-  * Maintained a strict, incremental Git commit history corresponding to individual features.
-* **Developer (Human)**:
-  * Provided high-level feature requirements and design decisions.
-  * Verified database constraints and Docker containers.
-  * Steered structural design patterns (e.g. transactional isolation in the CSV finalizer).
+### Decision & Rationale
+**Option C** was chosen. In local sandbox environments, third-party authentication configurations can introduce massive deployment hurdles (e.g., API key expiry, internet requirements, redirect URI configs). The fallback mock authenticator allows developers to spin up the entire monorepo instantly, switch between five simulated profiles (Aisha, Rohan, Priya, Meera, Sam) in one-click, and test timeline splitting scenarios offline while retaining a standard production-grade Clerk engine.
 
-### Development Environment & Status
-* **Operating System**: Linux (Ubuntu Desktop)
-* **IDE**: Cursor / VS Code
-* **Version Control**: Git (automated incremental feature commits)
-* **Database**: PostgreSQL (running locally in Docker)
+---
+
+## 2. CSV Import Pipelines: Direct Ingest vs. Staging Quarantine
+
+### Options Considered
+* **Option A (Direct Ingest)**: Read rows, insert valid ones, and abort on first error (fail-fast).
+* **Option B (Log & Skip)**: Insert valid rows and write errors to log files, skipping bad rows without manual correction options.
+* **Option C (Quarantine & Review Board)**: Parse all rows, write them to staging tables (`ImportSession`, `ImportRecord`), quarantine invalid lines with descriptive `ImportAnomaly` warnings, and expose a UI review board for manual corrections before committing.
+
+### Decision & Rationale
+**Option C** was chosen. In real-world data imports, files often contain minor spelling casing issues or date mismatches. Option A creates partial ingestion states, leading to duplicates upon retry. Option B drops data silently. Option C provides total audit-compliant control: the user sees what went wrong, edits fields in the staging dashboard, rejects rows that represent duplicates, and atomically commits the finalized session.
+
+---
+
+## 3. Debt Minimization vs. Pairwise Audit Traceability
+
+### Options Considered
+* **Option A (Simplified Debts Only)**: Use a greedy debt-minimization solver (e.g. using a heap/greedy match) to reduce total transaction paths.
+* **Option B (Chronological Pairwise Ledgers)**: Expose only direct pairwise debts.
+* **Option C (Greedy Minimization + Chronological Pairwise Trace Ledger)**: Use the minimization solver to offer a "Quick Settle" button, but provide an interactive pairwise ledger tracking every expense/payment between two users.
+
+### Decision & Rationale
+**Option C** was chosen. Debt simplification is highly convenient for reducing the number of physical bank transfers, but it destroys transaction history (e.g., if Aisha owes Priya, and Priya owes ris, simplification computes Aisha paying ris directly, hiding Priya's involvement). By combining a greedy balance match for quick settlements with a complete chronological pairwise audit trace, the app guarantees full balance auditability.
+
+---
+
+## 4. Client-Side PDF Report Generation
+
+### Options Considered
+* **Option A (Server-side PDF Rendering)**: Render reports on the backend using Puppeteer (headless Chrome) or PDFKit and return them as download streams.
+* **Option B (Client-side Rendering)**: Aggregate metadata on the backend and build the PDF in the user's browser using `jspdf` and `jspdf-autotable`.
+
+### Decision & Rationale
+**Option B** was chosen. Server-side PDF generators require heavy native system dependencies (which complicate cloud deployment on platforms like Vercel/Railway) and increase server CPU/RAM usage. Offloading PDF compilation to the client leverages local browser resources, ensures compatibility across lightweight cloud runtimes, and enables instantaneous, network-free downloads.
+
+---
+
+## 5. Database Soft Deletes (`deletedAt`)
+
+### Options Considered
+* **Option A (Physical Deletion)**: Run physical SQL `DELETE` operations on models.
+* **Option B (Soft Deletions with Boolean Flags)**: Set `isDeleted = true`.
+* **Option C (Soft Deletions with nullable `deletedAt` timestamps)**: Set `deletedAt = DateTime`.
+
+### Decision & Rationale
+**Option C** was chosen. In expense systems, deleting historical records physically ruins historical timelines and ledger balances. Soft-deleting via a nullable timestamp preserves records for auditing and tracking, preserves historical timeline membership slots, and makes it easy to filter active records using `where: { deletedAt: null }` in Prisma.
