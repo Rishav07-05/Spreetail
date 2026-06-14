@@ -1,7 +1,7 @@
 import { Router, Response } from "express";
 import prisma from "../lib/prisma.js";
 import { AuthenticatedRequest, requireAuth } from "../middleware/auth.middleware.js";
-import { parseCSV, mapCsvHeaders } from "../services/csv.service.js";
+import { parseCSV, mapCsvHeaders, detectAnomaliesForSession } from "../services/csv.service.js";
 import { createAuditLog } from "../services/audit.service.js";
 import { z } from "zod";
 
@@ -95,6 +95,9 @@ router.post("/group/:groupId/import", requireAuth, async (req: AuthenticatedRequ
       data: recordsData,
     });
 
+    // 4. Run Anomaly Detection Engine
+    const updatedSession = await detectAnomaliesForSession(session.id, groupId);
+
     const records = await prisma.importRecord.findMany({
       where: { sessionId: session.id },
       orderBy: { rowIndex: "asc" },
@@ -109,7 +112,7 @@ router.post("/group/:groupId/import", requireAuth, async (req: AuthenticatedRequ
     });
 
     res.status(201).json({
-      session,
+      session: updatedSession,
       records,
     });
   } catch (error: any) {
