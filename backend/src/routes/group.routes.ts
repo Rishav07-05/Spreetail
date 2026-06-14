@@ -2,6 +2,7 @@ import { Router, Response } from "express";
 import prisma from "../lib/prisma.js";
 import { AuthenticatedRequest, requireAuth } from "../middleware/auth.middleware.js";
 import { createAuditLog } from "../services/audit.service.js";
+import { getActiveMembersOnDate } from "../services/membership.service.js";
 import { z } from "zod";
 
 const router = Router();
@@ -350,4 +351,25 @@ router.post("/:id/leave", requireAuth, async (req: AuthenticatedRequest, res: Re
   }
 });
 
+// Get active members on a specific date (query param ?date=...)
+router.get("/:id/active-members", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id: groupId } = req.params;
+    const dateStr = req.query.date as string;
+    const date = dateStr ? new Date(dateStr) : new Date();
+
+    if (isNaN(date.getTime())) {
+      res.status(400).json({ error: "Invalid date format" });
+      return;
+    }
+
+    const activeMembers = await getActiveMembersOnDate(groupId, date);
+    res.status(200).json(activeMembers);
+  } catch (error) {
+    console.error("Error fetching active members:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;
+
