@@ -334,19 +334,19 @@ export const api = {
   },
 
   // CSV Import Center
-  getImportSessions: async (getToken: () => Promise<string | null>) => {
+  getImportSessions: async (getToken: () => Promise<string | null>, groupId: string) => {
     const headers = await getHeaders(getToken);
-    const res = await fetch(`${API_BASE}/import/sessions`, { headers });
+    const res = await fetch(`${API_BASE}/import/group/${groupId}/sessions`, { headers });
     if (!res.ok) throw new Error("Failed to fetch import sessions");
     return res.json() as Promise<ImportSession[]>;
   },
 
   uploadCsv: async (getToken: () => Promise<string | null>, groupId: string, fileName: string, csvContent: string) => {
     const headers = await getHeaders(getToken);
-    const res = await fetch(`${API_BASE}/import/upload`, {
+    const res = await fetch(`${API_BASE}/import/group/${groupId}/import`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ groupId, fileName, csvContent }),
+      body: JSON.stringify({ fileName, csvContent }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: "Failed to upload CSV" }));

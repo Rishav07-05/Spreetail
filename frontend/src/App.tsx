@@ -150,9 +150,9 @@ function App() {
   });
 
   const { data: importSessions = [], isLoading: isImportSessionsLoading } = useQuery({
-    queryKey: ["importSessions"],
-    queryFn: () => api.getImportSessions(getToken),
-    enabled: !!user && activeTab === "imports",
+    queryKey: ["importSessions", selectedGroupId],
+    queryFn: () => api.getImportSessions(getToken, selectedGroupId),
+    enabled: !!user && activeTab === "imports" && !!selectedGroupId,
   });
 
   const { data: importSessionDetails } = useQuery({

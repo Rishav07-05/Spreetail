@@ -171,6 +171,57 @@ router.get("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response)
   }
 });
 
+// Get all members of a group
+router.get("/:id/members", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const authUser = req.auth;
+    if (!authUser) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const { id } = req.params;
+
+    // Verify user is/was a member of the group
+    const userMembership = await prisma.groupMembership.findFirst({
+      where: {
+        groupId: id,
+        userId: authUser.userId,
+        deletedAt: null,
+      },
+    });
+
+    if (!userMembership) {
+      res.status(403).json({ error: "Access denied. You are not a member of this group." });
+      return;
+    }
+
+    const memberships = await prisma.groupMembership.findMany({
+      where: {
+        groupId: id,
+        deletedAt: null,
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            imageUrl: true,
+          },
+        },
+      },
+      orderBy: { joinedAt: "asc" },
+    });
+
+    res.status(200).json(memberships);
+  } catch (error) {
+    console.error("Error fetching group members:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
 const inviteMemberSchema = z.object({
   email: z.string().email("Invalid email format"),
   name: z.string().min(1, "Name is required"),
