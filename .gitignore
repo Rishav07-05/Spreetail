@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+.env*.local
+*.log
+.eslintcache
+.parcel-cache
+.cache
+.DS_Store
+package-lock.json
+build/
+.next/
+.vercel
+/backend/prisma/dev.db
+/backend/prisma/dev.db-journal
