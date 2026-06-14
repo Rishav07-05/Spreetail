@@ -2,6 +2,7 @@ import { Router, Response } from "express";
 import prisma from "../lib/prisma.js";
 import { AuthenticatedRequest, requireAuth } from "../middleware/auth.middleware.js";
 import { isMemberActiveOnDate } from "../services/membership.service.js";
+import { calculateSplit } from "../services/split.service.js";
 import { createAuditLog } from "../services/audit.service.js";
 import { z } from "zod";
 
@@ -50,64 +51,13 @@ router.post("/", requireAuth, async (req: AuthenticatedRequest, res: Response) =
       }
     }
 
-    // 3. Pre-calculate shares (Task 7 will refine this, but let's calculate them baseline here)
-    let computedParticipants = [];
-    if (splitType === "EQUAL") {
-      const equalShare = amount / participants.length;
-      computedParticipants = participants.map((p) => ({
-        userId: p.userId,
-        shareValue: 1, // equal weight
-        shareAmount: parseFloat(equalShare.toFixed(2)),
-      }));
-      // Resolve rounding discrepancy on the first participant
-      const totalComputed = computedParticipants.reduce((sum, p) => sum + p.shareAmount, 0);
-      const diff = parseFloat((amount - totalComputed).toFixed(2));
-      if (diff !== 0 && computedParticipants[0]) {
-        computedParticipants[0].shareAmount = parseFloat((computedParticipants[0].shareAmount + diff).toFixed(2));
-      }
-    } else if (splitType === "EXACT") {
-      const totalValue = participants.reduce((sum, p) => sum + p.shareValue, 0);
-      if (Math.abs(totalValue - amount) > 0.01) {
-        res.status(400).json({ error: `Split total mismatch: Exact shares sum to ${totalValue}, but expense amount is ${amount}` });
-        return;
-      }
-      computedParticipants = participants.map((p) => ({
-        userId: p.userId,
-        shareValue: p.shareValue,
-        shareAmount: p.shareValue,
-      }));
-    } else if (splitType === "PERCENTAGE") {
-      const totalPercentage = participants.reduce((sum, p) => sum + p.shareValue, 0);
-      if (Math.abs(totalPercentage - 100) > 0.01) {
-        res.status(400).json({ error: `Split total mismatch: Percentages sum to ${totalPercentage}%, but must sum to 100%` });
-        return;
-      }
-      computedParticipants = participants.map((p) => ({
-        userId: p.userId,
-        shareValue: p.shareValue,
-        shareAmount: parseFloat(((p.shareValue / 100) * amount).toFixed(2)),
-      }));
-      const totalComputed = computedParticipants.reduce((sum, p) => sum + p.shareAmount, 0);
-      const diff = parseFloat((amount - totalComputed).toFixed(2));
-      if (diff !== 0 && computedParticipants[0]) {
-        computedParticipants[0].shareAmount = parseFloat((computedParticipants[0].shareAmount + diff).toFixed(2));
-      }
-    } else if (splitType === "WEIGHTED") {
-      const totalWeight = participants.reduce((sum, p) => sum + p.shareValue, 0);
-      if (totalWeight <= 0) {
-        res.status(400).json({ error: "Total weight must be greater than zero" });
-        return;
-      }
-      computedParticipants = participants.map((p) => ({
-        userId: p.userId,
-        shareValue: p.shareValue,
-        shareAmount: parseFloat(((p.shareValue / totalWeight) * amount).toFixed(2)),
-      }));
-      const totalComputed = computedParticipants.reduce((sum, p) => sum + p.shareAmount, 0);
-      const diff = parseFloat((amount - totalComputed).toFixed(2));
-      if (diff !== 0 && computedParticipants[0]) {
-        computedParticipants[0].shareAmount = parseFloat((computedParticipants[0].shareAmount + diff).toFixed(2));
-      }
+    // 3. Pre-calculate shares using Split Engine
+    let computedParticipants;
+    try {
+      computedParticipants = calculateSplit(amount, splitType, participants);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+      return;
     }
 
     // 4. Create in DB
@@ -217,63 +167,13 @@ router.put("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response)
       }
     }
 
-    // Split calculations
-    let computedParticipants = [];
-    if (splitType === "EQUAL") {
-      const equalShare = amount / participants.length;
-      computedParticipants = participants.map((p) => ({
-        userId: p.userId,
-        shareValue: 1,
-        shareAmount: parseFloat(equalShare.toFixed(2)),
-      }));
-      const totalComputed = computedParticipants.reduce((sum, p) => sum + p.shareAmount, 0);
-      const diff = parseFloat((amount - totalComputed).toFixed(2));
-      if (diff !== 0 && computedParticipants[0]) {
-        computedParticipants[0].shareAmount = parseFloat((computedParticipants[0].shareAmount + diff).toFixed(2));
-      }
-    } else if (splitType === "EXACT") {
-      const totalValue = participants.reduce((sum, p) => sum + p.shareValue, 0);
-      if (Math.abs(totalValue - amount) > 0.01) {
-        res.status(400).json({ error: "Exact split total mismatch" });
-        return;
-      }
-      computedParticipants = participants.map((p) => ({
-        userId: p.userId,
-        shareValue: p.shareValue,
-        shareAmount: p.shareValue,
-      }));
-    } else if (splitType === "PERCENTAGE") {
-      const totalPercentage = participants.reduce((sum, p) => sum + p.shareValue, 0);
-      if (Math.abs(totalPercentage - 100) > 0.01) {
-        res.status(400).json({ error: "Percentage split must total 100%" });
-        return;
-      }
-      computedParticipants = participants.map((p) => ({
-        userId: p.userId,
-        shareValue: p.shareValue,
-        shareAmount: parseFloat(((p.shareValue / 100) * amount).toFixed(2)),
-      }));
-      const totalComputed = computedParticipants.reduce((sum, p) => sum + p.shareAmount, 0);
-      const diff = parseFloat((amount - totalComputed).toFixed(2));
-      if (diff !== 0 && computedParticipants[0]) {
-        computedParticipants[0].shareAmount = parseFloat((computedParticipants[0].shareAmount + diff).toFixed(2));
-      }
-    } else if (splitType === "WEIGHTED") {
-      const totalWeight = participants.reduce((sum, p) => sum + p.shareValue, 0);
-      if (totalWeight <= 0) {
-        res.status(400).json({ error: "Total weight must be positive" });
-        return;
-      }
-      computedParticipants = participants.map((p) => ({
-        userId: p.userId,
-        shareValue: p.shareValue,
-        shareAmount: parseFloat(((p.shareValue / totalWeight) * amount).toFixed(2)),
-      }));
-      const totalComputed = computedParticipants.reduce((sum, p) => sum + p.shareAmount, 0);
-      const diff = parseFloat((amount - totalComputed).toFixed(2));
-      if (diff !== 0 && computedParticipants[0]) {
-        computedParticipants[0].shareAmount = parseFloat((computedParticipants[0].shareAmount + diff).toFixed(2));
-      }
+    // Split calculations using Split Engine
+    let computedParticipants;
+    try {
+      computedParticipants = calculateSplit(amount, splitType, participants);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+      return;
     }
 
     // Run update in transaction: soft delete previous participants, update expense details, create new participants
