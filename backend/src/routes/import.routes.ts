@@ -445,5 +445,44 @@ router.post("/session/:sessionId/finalize", requireAuth, async (req: Authenticat
   }
 });
 
+// Generate import session report summary
+router.get("/session/:sessionId/report", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    const session = await prisma.importSession.findUnique({
+      where: { id: sessionId },
+      include: { anomalies: true },
+    });
+
+    if (!session) {
+      res.status(404).json({ error: "Session not found" });
+      return;
+    }
+
+    const anomaliesFound = session.anomalies.length;
+    const anomaliesFixed = session.anomalies.filter(a => a.userDecision === "APPROVED").length;
+    const rejectedRecords = session.anomalies.filter(a => a.userDecision === "REJECTED").length;
+    const durationMs = session.completedAt 
+      ? session.completedAt.getTime() - session.startedAt.getTime() 
+      : 0;
+
+    res.status(200).json({
+      fileName: session.fileName,
+      status: session.status,
+      totalRows: session.totalRows,
+      importedRows: session.importedRows,
+      skippedRows: session.skippedRows,
+      anomaliesFound,
+      anomaliesFixed,
+      rejectedRecords,
+      importDurationSec: (durationMs / 1000).toFixed(2),
+      timestamp: session.completedAt || new Date(),
+    });
+  } catch (error) {
+    console.error("Error generating report metadata:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;
 
