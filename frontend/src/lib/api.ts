@@ -147,7 +147,7 @@ export interface ImportReportSummary {
   timestamp: string;
 }
 
-const API_BASE = "/api";
+const API_BASE = "https://spreetail-okwr.onrender.com/api";
 
 async function getHeaders(getToken: () => Promise<string | null>) {
   const token = await getToken();
