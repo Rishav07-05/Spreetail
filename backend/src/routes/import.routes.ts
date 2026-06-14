@@ -2,6 +2,8 @@ import { Router, Response } from "express";
 import prisma from "../lib/prisma.js";
 import { AuthenticatedRequest, requireAuth } from "../middleware/auth.middleware.js";
 import { parseCSV, mapCsvHeaders, detectAnomaliesForSession } from "../services/csv.service.js";
+import { calculateSplit } from "../services/split.service.js";
+import { isMemberActiveOnDate } from "../services/membership.service.js";
 import { createAuditLog } from "../services/audit.service.js";
 import { z } from "zod";
 
@@ -164,4 +166,284 @@ router.get("/session/:sessionId", requireAuth, async (req: AuthenticatedRequest,
   }
 });
 
+// Resolve a specific anomaly
+const resolveAnomalySchema = z.zod.object({
+  decision: z.zod.enum(["APPROVED", "REJECTED"]),
+  correction: z.zod.object({
+    date: z.zod.string(),
+    description: z.zod.string(),
+    amount: z.zod.string(),
+    payer: z.zod.string(),
+    participants: z.zod.string(),
+    splitType: z.zod.string(),
+    splitValues: z.zod.string(),
+    currency: z.zod.string(),
+  }).optional(),
+});
+
+router.post("/anomaly/:anomalyId/resolve", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const authUser = req.auth;
+    if (!authUser) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const { anomalyId } = req.params;
+    const { decision, correction } = resolveAnomalySchema.parse(req.body);
+
+    const anomaly = await prisma.importAnomaly.findUnique({
+      where: { id: anomalyId },
+      include: { record: true },
+    });
+
+    if (!anomaly) {
+      res.status(404).json({ error: "Anomaly not found" });
+      return;
+    }
+
+    // Update anomaly decision
+    const updatedAnomaly = await prisma.importAnomaly.update({
+      where: { id: anomalyId },
+      data: {
+        userDecision: decision,
+        resolvedById: authUser.userId,
+        resolvedAt: new Date(),
+      },
+    });
+
+    // If approved and correction is provided, update the raw content of the parent record
+    if (decision === "APPROVED" && correction && anomaly.recordId) {
+      await prisma.importRecord.update({
+        where: { id: anomaly.recordId },
+        data: {
+          rawContent: JSON.stringify(correction),
+        },
+      });
+    }
+
+    await createAuditLog({
+      userId: authUser.userId,
+      action: `ANOMALY_RESOLVED_${decision}`,
+      entityType: "ImportAnomaly",
+      entityId: anomalyId,
+      newValues: { decision, correction },
+    });
+
+    res.status(200).json(updatedAnomaly);
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ error: error.errors[0].message });
+      return;
+    }
+    console.error("Error resolving anomaly:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Finalize import session and create actual expenses / settlements
+router.post("/session/:sessionId/finalize", requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const authUser = req.auth;
+    if (!authUser) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const { sessionId } = req.params;
+
+    const session = await prisma.importSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        records: {
+          include: {
+            anomalies: true,
+          },
+        },
+      },
+    });
+
+    if (!session) {
+      res.status(404).json({ error: "Import session not found" });
+      return;
+    }
+
+    if (session.status === "COMPLETED") {
+      res.status(400).json({ error: "Import session is already finalized and completed." });
+      return;
+    }
+
+    // Verify all anomalies in this session are resolved (APPROVED or REJECTED)
+    const pendingAnomaliesCount = await prisma.importAnomaly.count({
+      where: {
+        sessionId,
+        userDecision: "PENDING",
+      },
+    });
+
+    if (pendingAnomaliesCount > 0) {
+      res.status(400).json({
+        error: `Cannot finalize session. There are still ${pendingAnomaliesCount} pending anomalies requiring review.`,
+      });
+      return;
+    }
+
+    // Get group members for user matching and timeline verification
+    const groupMembers = await prisma.groupMembership.findMany({
+      where: { groupId: session.groupId, deletedAt: null },
+      include: { user: true },
+    });
+
+    let importedCount = 0;
+    let skippedCount = 0;
+
+    // Run creation in a database transaction
+    await prisma.$transaction(async (tx) => {
+      for (const record of session.records) {
+        // Determine record state:
+        // If any associated anomaly is REJECTED, skip this record.
+        const hasRejectedAnomaly = record.anomalies.some(a => a.userDecision === "REJECTED");
+
+        if (hasRejectedAnomaly) {
+          await tx.importRecord.update({
+            where: { id: record.id },
+            data: { status: "SKIPPED" },
+          });
+          skippedCount++;
+          continue;
+        }
+
+        // Parse content
+        const content = JSON.parse(record.rawContent);
+        const amount = parseFloat(content.amount.replace(/[^\d.-]/g, ""));
+        const expenseDate = new Date(content.date);
+        const splitType = (content.splitType || "EQUAL").toUpperCase() as "EQUAL" | "EXACT" | "PERCENTAGE" | "WEIGHTED";
+        const payerStr = content.payer.trim();
+        const partStr = content.participants || "";
+        const descStr = content.description || "CSV Imported Expense";
+
+        // Helper to match user
+        const findUser = (str: string) => {
+          const lower = str.toLowerCase();
+          return groupMembers.find(
+            (m) => m.user.email.toLowerCase() === lower || m.user.name.toLowerCase() === lower
+          )?.user;
+        };
+
+        const payerUser = findUser(payerStr);
+        if (!payerUser) {
+          throw new Error(`Row ${record.rowIndex}: Payer '${payerStr}' could not be matched to an active group member.`);
+        }
+
+        // Check if settlement or expense
+        const isSettlement = descStr.toLowerCase().includes("settle") || descStr.toLowerCase().includes("payment");
+        const participantStrings = partStr.split(";").map((p: string) => p.trim()).filter((p: string) => p !== "");
+
+        if (isSettlement) {
+          // Record is a Settlement
+          const recipientStr = participantStrings[0];
+          const recipientUser = recipientStr ? findUser(recipientStr) : null;
+
+          if (!recipientUser) {
+            throw new Error(`Row ${record.rowIndex}: Recipient '${recipientStr}' for settlement could not be matched.`);
+          }
+
+          await tx.settlement.create({
+            data: {
+              groupId: session.groupId,
+              payerId: payerUser.id,
+              payeeId: recipientUser.id,
+              amount,
+              date: expenseDate,
+            },
+          });
+        } else {
+          // Record is an Expense
+          const splitParticipants: { userId: string; shareValue: number }[] = [];
+
+          if (splitType === "EQUAL") {
+            for (const pStr of participantStrings) {
+              const u = findUser(pStr);
+              if (u) {
+                splitParticipants.push({ userId: u.id, shareValue: 1 });
+              }
+            }
+          } else {
+            const splitVals = content.splitValues.split(";").map((v: string) => parseFloat(v.trim())).filter((v: number) => !isNaN(v));
+            for (let i = 0; i < participantStrings.length; i++) {
+              const u = findUser(participantStrings[i]);
+              const val = splitVals[i] ?? 0;
+              if (u) {
+                splitParticipants.push({ userId: u.id, shareValue: val });
+              }
+            }
+          }
+
+          if (splitParticipants.length === 0) {
+            throw new Error(`Row ${record.rowIndex}: No valid participants found for expense.`);
+          }
+
+          // Compute splits
+          const computedShares = calculateSplit(amount, splitType, splitParticipants);
+
+          // Create expense
+          await tx.expense.create({
+            data: {
+              groupId: session.groupId,
+              payerId: payerUser.id,
+              amount,
+              description: descStr,
+              date: expenseDate,
+              splitType,
+              participants: {
+                create: computedShares.map((cs) => ({
+                  userId: cs.userId,
+                  shareAmount: cs.shareAmount,
+                  shareValue: cs.shareValue,
+                })),
+              },
+            },
+          });
+        }
+
+        // Mark record as applied
+        await tx.importRecord.update({
+          where: { id: record.id },
+          data: { status: "APPLIED" },
+        });
+
+        importedCount++;
+      }
+
+      // Finalize session details
+      await tx.importSession.update({
+        where: { id: sessionId },
+        data: {
+          status: "COMPLETED",
+          importedRows: importedCount,
+          skippedRows: skippedCount,
+          completedAt: new Date(),
+        },
+      });
+    });
+
+    await createAuditLog({
+      userId: authUser.userId,
+      action: "CSV_IMPORT_FINALIZED",
+      entityType: "ImportSession",
+      entityId: sessionId,
+      newValues: { importedRows: importedCount, skippedRows: skippedCount },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Session finalized successfully. Imported ${importedCount} records, skipped ${skippedCount}.`,
+    });
+  } catch (error: any) {
+    console.error("Error finalizing session:", error);
+    res.status(500).json({ error: error.message || "Internal server error" });
+  }
+});
+
 export default router;
+
