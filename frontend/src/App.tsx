@@ -1132,7 +1132,7 @@ function App() {
                             <FileDown className="w-4 h-4 text-[#DC143C]" /> Download PDF Report
                           </button>
                         )}
-                        {importSessionDetails.session.status === "DRAFT" && (
+                        {importSessionDetails.session.status !== "FINALIZED" && (
                           <button
                             onClick={() => finalizeSessionMutation.mutate(importSessionDetails.session.id)}
                             className="bg-[#DC143C] hover:bg-[#c81035] text-xs font-semibold px-4 py-2.5 rounded text-[#FEFDDF]"
@@ -1154,15 +1154,16 @@ function App() {
                       <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
                         {importSessionDetails.anomalies.map((anomaly) => {
                           const isPending = anomaly.userDecision === "PENDING";
+                          const rawRecord = anomaly.record?.rawContent ? JSON.parse(anomaly.record.rawContent) : null;
                           const correction = anomalyCorrections[anomaly.id] || {
-                            date: anomaly.record?.rawContent ? JSON.parse(anomaly.record.rawContent)[0] || "" : "",
-                            description: anomaly.record?.rawContent ? JSON.parse(anomaly.record.rawContent)[1] || "" : "",
-                            amount: anomaly.record?.rawContent ? JSON.parse(anomaly.record.rawContent)[2] || "" : "",
-                            payer: anomaly.record?.rawContent ? JSON.parse(anomaly.record.rawContent)[3] || "" : "",
-                            participants: anomaly.record?.rawContent ? JSON.parse(anomaly.record.rawContent)[4] || "" : "",
-                            splitType: anomaly.record?.rawContent ? JSON.parse(anomaly.record.rawContent)[5] || "" : "",
-                            splitValues: anomaly.record?.rawContent ? JSON.parse(anomaly.record.rawContent)[6] || "" : "",
-                            currency: anomaly.record?.rawContent ? JSON.parse(anomaly.record.rawContent)[7] || "" : "",
+                            date: rawRecord ? rawRecord.date || "" : "",
+                            description: rawRecord ? rawRecord.description || "" : "",
+                            amount: rawRecord ? rawRecord.amount || "" : "",
+                            payer: rawRecord ? rawRecord.payer || "" : "",
+                            participants: rawRecord ? rawRecord.participants || "" : "",
+                            splitType: rawRecord ? rawRecord.splitType || "" : "",
+                            splitValues: rawRecord ? rawRecord.splitValues || "" : "",
+                            currency: rawRecord ? rawRecord.currency || "" : "",
                           };
 
                           const updateCorrectionField = (field: string, val: string) => {
@@ -1200,7 +1201,7 @@ function App() {
                               </div>
 
                               {/* Interactive Inline Correction Fields */}
-                              {isPending && importSessionDetails.session.status === "DRAFT" && (
+                              {isPending && importSessionDetails.session.status !== "FINALIZED" && (
                                 <div className="bg-[#141414] border border-[#222222] p-3 rounded space-y-2">
                                   <span className="block text-[9px] uppercase tracking-wider text-gray-500 font-semibold mb-1">
                                     Inline Editor

@@ -359,7 +359,8 @@ export const api = {
     const headers = await getHeaders(getToken);
     const res = await fetch(`${API_BASE}/import/session/${sessionId}`, { headers });
     if (!res.ok) throw new Error("Failed to fetch session details");
-    return res.json() as Promise<{ session: ImportSession; anomalies: ImportAnomaly[] }>;
+    const data = await res.json();
+    return { session: data, anomalies: data.anomalies || [] } as unknown as { session: ImportSession; anomalies: ImportAnomaly[] };
   },
 
   resolveAnomaly: async (

@@ -13,3 +13,4 @@ build/
 .vercel
 /backend/prisma/dev.db
 /backend/prisma/dev.db-journal
+sample.csv

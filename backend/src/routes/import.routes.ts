@@ -150,7 +150,11 @@ router.get("/session/:sessionId", requireAuth, async (req: AuthenticatedRequest,
       where: { id: sessionId },
       include: {
         records: { orderBy: { rowIndex: "asc" } },
-        anomalies: true,
+        anomalies: {
+          include: {
+            record: true,
+          },
+        },
       },
     });
 
