@@ -8,19 +8,19 @@ import { z } from "zod";
 
 const router = Router();
 
-const participantSchema = z.zod.object({
-  userId: z.zod.string().min(1, "Participant user ID is required"),
-  shareValue: z.zod.number().nonnegative("Share value must be positive or zero"),
+const participantSchema = z.object({
+  userId: z.string().min(1, "Participant user ID is required"),
+  shareValue: z.number().nonnegative("Share value must be positive or zero"),
 });
 
-const createExpenseSchema = z.zod.object({
-  groupId: z.zod.string().uuid("Invalid group ID"),
-  payerId: z.zod.string().min(1, "Payer ID is required"),
-  amount: z.zod.number().positive("Amount must be greater than zero"),
-  description: z.zod.string().min(1, "Description is required").max(255),
-  date: z.zod.string().refine((val) => !isNaN(Date.parse(val)), "Invalid date"),
-  splitType: z.zod.enum(["EQUAL", "EXACT", "PERCENTAGE", "WEIGHTED"]),
-  participants: z.zod.array(participantSchema).min(1, "At least one participant is required"),
+const createExpenseSchema = z.object({
+  groupId: z.string().uuid("Invalid group ID"),
+  payerId: z.string().min(1, "Payer ID is required"),
+  amount: z.number().positive("Amount must be greater than zero"),
+  description: z.string().min(1, "Description is required").max(255),
+  date: z.string().refine((val: string) => !isNaN(Date.parse(val)), "Invalid date"),
+  splitType: z.enum(["EQUAL", "EXACT", "PERCENTAGE", "WEIGHTED"]),
+  participants: z.array(participantSchema).min(1, "At least one participant is required"),
 });
 
 // Create an expense

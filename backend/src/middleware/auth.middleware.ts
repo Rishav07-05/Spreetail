@@ -55,7 +55,7 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
   }
 
   try {
-    const requestState = await clerkClient.authenticateRequest(req, {
+    const requestState = await clerkClient.authenticateRequest(req as any, {
       jwtKey: process.env.CLERK_JWT_KEY,
       authorizedParties: process.env.CLERK_AUTHORIZED_PARTIES ? process.env.CLERK_AUTHORIZED_PARTIES.split(",") : undefined,
     });
@@ -65,7 +65,7 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
       return;
     }
 
-    const userId = requestState.toAuth().userId;
+    const userId = requestState.toAuth().userId!;
     
     // Fetch user details from Clerk if needed, or pass the userId along
     const userDetails = await clerkClient.users.getUser(userId);

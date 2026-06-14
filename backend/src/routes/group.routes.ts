@@ -7,9 +7,9 @@ import { z } from "zod";
 
 const router = Router();
 
-const createGroupSchema = z.zod.object({
-  name: z.zod.string().min(1, "Group name is required"),
-  description: z.zod.string().optional(),
+const createGroupSchema = z.object({
+  name: z.string().min(1, "Group name is required"),
+  description: z.string().optional(),
 });
 
 // Create a new group
@@ -171,10 +171,10 @@ router.get("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response)
   }
 });
 
-const inviteMemberSchema = z.zod.object({
-  email: z.zod.string().email("Invalid email format"),
-  name: z.zod.string().min(1, "Name is required"),
-  joinedAt: z.zod.string().optional(), // ISO date
+const inviteMemberSchema = z.object({
+  email: z.string().email("Invalid email format"),
+  name: z.string().min(1, "Name is required"),
+  joinedAt: z.string().optional(), // ISO date
 });
 
 // Invite / Add a member to a group
@@ -287,8 +287,8 @@ router.post("/:id/invite", requireAuth, async (req: AuthenticatedRequest, res: R
   }
 });
 
-const leaveGroupSchema = z.zod.object({
-  leftAt: z.zod.string().optional(), // ISO date
+const leaveGroupSchema = z.object({
+  leftAt: z.string().optional(), // ISO date
 });
 
 // Leave a group (sets leftAt field)

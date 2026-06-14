@@ -9,9 +9,9 @@ import { z } from "zod";
 
 const router = Router();
 
-const importCsvSchema = z.zod.object({
-  fileName: z.zod.string().min(1, "File name is required"),
-  csvContent: z.zod.string().min(1, "CSV content is required"),
+const importCsvSchema = z.object({
+  fileName: z.string().min(1, "File name is required"),
+  csvContent: z.string().min(1, "CSV content is required"),
 });
 
 // Import CSV endpoint
@@ -167,17 +167,17 @@ router.get("/session/:sessionId", requireAuth, async (req: AuthenticatedRequest,
 });
 
 // Resolve a specific anomaly
-const resolveAnomalySchema = z.zod.object({
-  decision: z.zod.enum(["APPROVED", "REJECTED"]),
-  correction: z.zod.object({
-    date: z.zod.string(),
-    description: z.zod.string(),
-    amount: z.zod.string(),
-    payer: z.zod.string(),
-    participants: z.zod.string(),
-    splitType: z.zod.string(),
-    splitValues: z.zod.string(),
-    currency: z.zod.string(),
+const resolveAnomalySchema = z.object({
+  decision: z.enum(["APPROVED", "REJECTED"]),
+  correction: z.object({
+    date: z.string(),
+    description: z.string(),
+    amount: z.string(),
+    payer: z.string(),
+    participants: z.string(),
+    splitType: z.string(),
+    splitValues: z.string(),
+    currency: z.string(),
   }).optional(),
 });
 

@@ -7,12 +7,12 @@ import { z } from "zod";
 
 const router = Router();
 
-const createSettlementSchema = z.zod.object({
-  groupId: z.zod.string().uuid("Invalid group ID"),
-  payerId: z.zod.string().min(1, "Payer ID is required"),
-  payeeId: z.zod.string().min(1, "Payee ID is required"),
-  amount: z.zod.number().positive("Amount must be greater than zero"),
-  date: z.zod.string().refine((val) => !isNaN(Date.parse(val)), "Invalid date"),
+const createSettlementSchema = z.object({
+  groupId: z.string().uuid("Invalid group ID"),
+  payerId: z.string().min(1, "Payer ID is required"),
+  payeeId: z.string().min(1, "Payee ID is required"),
+  amount: z.number().positive("Amount must be greater than zero"),
+  date: z.string().refine((val: string) => !isNaN(Date.parse(val)), "Invalid date"),
 });
 
 // Record a settlement payment
