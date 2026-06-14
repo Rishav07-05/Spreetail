@@ -1,0 +1,150 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id         String            @id
+  email      String            @unique
+  name       String
+  imageUrl   String?
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  deletedAt  DateTime?
+  membership GroupMembership[]
+  auditLogs  AuditLog[]
+}
+
+model Group {
+  id          String            @id @default(uuid())
+  name        String
+  description String?
+  createdById String
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  deletedAt   DateTime?
+  memberships GroupMembership[]
+  expenses    Expense[]
+  settlements Settlement[]
+  imports     ImportSession[]
+}
+
+model GroupMembership {
+  id        String    @id @default(uuid())
+  groupId   String
+  userId    String
+  joinedAt  DateTime  @default(now())
+  leftAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+  group     Group     @relation(fields: [groupId], references: [id])
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@unique([groupId, userId, joinedAt])
+}
+
+model Expense {
+  id           String               @id @default(uuid())
+  groupId      String
+  payerId      String
+  amount       Float
+  description  String
+  date         DateTime
+  splitType    String
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  deletedAt    DateTime?
+  group        Group                @relation(fields: [groupId], references: [id])
+  participants ExpenseParticipant[]
+}
+
+model ExpenseParticipant {
+  id          String    @id @default(uuid())
+  expenseId   String
+  userId      String
+  shareAmount Float
+  shareValue  Float
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  expense     Expense   @relation(fields: [expenseId], references: [id])
+}
+
+model Settlement {
+  id        String    @id @default(uuid())
+  groupId   String
+  payerId   String
+  payeeId   String
+  amount    Float
+  date      DateTime
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+  group     Group     @relation(fields: [groupId], references: [id])
+}
+
+model ImportSession {
+  id           String          @id @default(uuid())
+  groupId      String
+  uploadedById String
+  status       String
+  fileName     String
+  totalRows    Int
+  importedRows Int
+  skippedRows  Int
+  startedAt    DateTime
+  completedAt  DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  group        Group           @relation(fields: [groupId], references: [id])
+  records      ImportRecord[]
+  anomalies    ImportAnomaly[]
+}
+
+model ImportRecord {
+  id         String          @id @default(uuid())
+  sessionId  String
+  rowIndex   Int
+  rawContent String
+  status     String
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  session    ImportSession   @relation(fields: [sessionId], references: [id])
+  anomalies  ImportAnomaly[]
+}
+
+model ImportAnomaly {
+  id                String        @id @default(uuid())
+  sessionId         String
+  recordId          String?
+  type              String
+  severity          String
+  description       String
+  detectedAt        DateTime      @default(now())
+  recommendedAction String
+  userDecision      String
+  resolvedById      String?
+  resolvedAt        DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  session           ImportSession @relation(fields: [sessionId], references: [id])
+  record            ImportRecord? @relation(fields: [recordId], references: [id])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  action     String
+  entityType String
+  entityId   String
+  oldValues  String?
+  newValues  String?
+  timestamp  DateTime @default(now())
+  createdAt  DateTime @default(now())
+  user       User?    @relation(fields: [userId], references: [id])
+}
